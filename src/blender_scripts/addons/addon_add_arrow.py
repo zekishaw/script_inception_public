@@ -5,7 +5,7 @@ bl_info = {
     "name": "Add arrow",
     "author": "mtav",
     "version": (1, 0),
-    "blender": (2, 75, 0),
+    "blender": (3, 6, 0),
     "location": "View3D > Add > Mesh > New Arrow",
     "description": "Adds a new Arrow Mesh Object",
     "warning": "",
@@ -32,52 +32,52 @@ class OBJECT_OT_add_arrow(Operator):
     bl_label = "Add Arrow Mesh Object"
     bl_options = {'REGISTER', 'UNDO', 'PRESET'}
 
-    start_point = FloatVectorProperty(
+    start_point : FloatVectorProperty(
             name="start_point",
             default=(0,0,0),
             description="start point",
             )
 
-    end_point = FloatVectorProperty(
+    end_point : FloatVectorProperty(
             name="end_point",
             default=(1,1,1),
             description="end point",
             )
 
-    origin = FloatVectorProperty(
+    origin : FloatVectorProperty(
             name="origin",
             default=(0,0,0),
             description="start point",
             )
 
-    vector = FloatVectorProperty(
+    vector : FloatVectorProperty(
             name="vector",
             default=(1,1,1),
             description="end point",
             )
 
-    cone_length = FloatProperty(
+    cone_length : FloatProperty(
             name="cone_length",
             default=1/5.0,
             description="cone length",
             min=0,
             )
 
-    cone_radius = FloatProperty(
+    cone_radius : FloatProperty(
             name="cone_radius",
             default=1/20.0,
             description="cone radius",
             min=0,
             )
 
-    cylinder_radius = FloatProperty(
+    cylinder_radius : FloatProperty(
             name="cylinder_radius",
             default=1/40.0,
             description="cylinder radius",
             min=0,
             )
     
-    method = EnumProperty(items = (("start_and_end","start+end point","start+end point"),
+    method : EnumProperty(items = (("start_and_end","start+end point","start+end point"),
                                       ("origin_and_vector","origin+vector","origin+vector"),
                                       ("arrow_presets","arrow presets","arrow presets"),
                                       ("arrow_group_presets","arrow group presets","arrow group presets"),
@@ -90,8 +90,8 @@ class OBJECT_OT_add_arrow(Operator):
     #preset_labels.extend(preset_vectors.keys())
     #preset = EnumProperty(items = ((i,i,i) for i in preset_labels), default=preset_labels[0], name = "Presets:")
     
-    preset_vectors_enum = EnumProperty(items = ((i,i,i) for i in preset_vectors.keys()), name = "Preset vectors:")
-    preset_vectors_groups_enum = EnumProperty(items = ((i,i,i) for i in preset_vectors_groups.keys()), name = "Preset vector groups:")
+    preset_vectors_enum : EnumProperty(items = ((i,i,i) for i in preset_vectors.keys()), name = "Preset vectors:")
+    preset_vectors_groups_enum : EnumProperty(items = ((i,i,i) for i in preset_vectors_groups.keys()), name = "Preset vector groups:")
     
     # cf /usr/share/blender/scripts/addons/add_mesh_extra_objects/add_mesh_solid.py
     #previous preset, for User-friendly reasons
@@ -104,7 +104,7 @@ class OBJECT_OT_add_arrow(Operator):
         '''
         self.report({'INFO'}, 'arrow addon invoke called')
         # Use initial cursor location
-        self.start_point = self.origin = self.location = numpy.array(bpy.context.scene.cursor_location)
+        self.start_point = self.origin = self.location = numpy.array(bpy.context.scene.cursor.location)
         return self.execute(context)
     
     def draw(self, context):
@@ -170,7 +170,7 @@ class OBJECT_OT_add_arrow(Operator):
         for k in self.preset_vectors_groups[self.preset_vectors_groups_enum]:
           V_list.append((k, self.preset_vectors[k]))
       else:
-        raise
+        raise Exception(f'self.method undefined: self.method = {self.method}')
       
       obj_list = []
       for (name, V) in V_list:
@@ -181,41 +181,8 @@ class OBJECT_OT_add_arrow(Operator):
       if len(obj_list) > 1:
         createGroup(obj_list, active_object=None, context = bpy.context, group_name=group_name)
       return {'FINISHED'}
-      
-      ## piece of code to make presets remain until parameters are changed
-      #if self.preset != "Custom":
-        ##if preset, set preset
-        #if self.previousSetting != self.preset:
-          #self.vector = self.preset_vectors[self.preset]
-          #self.end_point = Vector(self.origin) + Vector(self.vector)
-        #else:
-          #if numpy.linalg.norm(self.vector - self.preset_vectors[self.preset]) != 0:
-            #self.preset = "Custom"
-      
-      #self.previousSetting = self.preset
-      
-      if self.preset == self.preset_labels[0]:
-        if self.method == 'start_and_end':
-          self.origin = self.start_point
-          self.vector = Vector(self.end_point) - Vector(self.start_point)
-        else:
-          self.start_point = self.origin
-          self.end_point = Vector(self.origin) + Vector(self.vector)
-        
-        add_arrow(self, self.start_point, self.end_point, cone_length=self.cone_length, cone_radius=self.cone_radius, cylinder_radius=self.cylinder_radius)
-      else:
-        # This is ugly, but let's do it like this for now.
-        # .. todo:: better designed addon, perhaps separate addons, reuse operators, etc. Sub-operators?
-        if isinstance(self.preset_vectors[self.preset][0], str):
-          print('str')
-          V_list = [self.preset_vectors[k] for k in self.preset_vectors[self.preset]]
-        else:
-          V_list = [self.preset_vectors[self.preset]]
-          
-      return {'FINISHED'}
 
 # Registration
-
 def add_arrow_button(self, context):
     self.layout.operator(
         OBJECT_OT_add_arrow.bl_idname,
@@ -233,12 +200,12 @@ def add_arrow_manual_map():
 def register():
     bpy.utils.register_class(OBJECT_OT_add_arrow)
     bpy.utils.register_manual_map(add_arrow_manual_map)
-    bpy.types.INFO_MT_mesh_add.append(add_arrow_button)
+    bpy.types.VIEW3D_MT_mesh_add.append(add_arrow_button)
 
 def unregister():
     bpy.utils.unregister_class(OBJECT_OT_add_arrow)
     bpy.utils.unregister_manual_map(add_arrow_manual_map)
-    bpy.types.INFO_MT_mesh_add.remove(add_arrow_button)
+    bpy.types.VIEW3D_MT_mesh_add.remove(add_arrow_button)
 
 if __name__ == "__main__":
     register()

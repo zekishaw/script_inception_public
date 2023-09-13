@@ -18,6 +18,13 @@ import rlcompleter
 import sys
 import warnings
 from glob import glob
+import matplotlib.pyplot as plt
+
+try:
+    import meep as mp
+    from meep import mpb
+except:
+    pass
 
 # change autocomplete to tab
 readline.parse_and_bind("tab: complete")
@@ -40,6 +47,7 @@ del atexit, readline, rlcompleter, save_history, historyPath
 import bfdtd
 
 from GWL.GWL_parser import *
+from MPB.MPB_parser import parse_MPB
 from constants.physcon import get_c0, get_e, get_eV, get_epsilon0, get_mu0, get_h, get_h_eVs, get_hb, get_me
 from utilities.brisFDTD_ID_info import *
 from utilities.harminv import getFrequencies

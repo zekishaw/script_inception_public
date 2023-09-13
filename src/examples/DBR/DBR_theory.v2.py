@@ -21,6 +21,8 @@ import meep as mp
 from meep import mpb
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from scipy.io import savemat
+import os
 
 # https://blakeaw.github.io/2020-05-25-improve-matplotlib-notebook-inline-res/
 plt.rcParams['figure.dpi'] = 300
@@ -1163,17 +1165,11 @@ def test_reference_DBR_3():
         findBandEdges(dbr_instance=foo, vs_K_normal=False, n_in=1, Spol=Spol, pr=pr, vs_wavelength=False)
 
 def test_reference_DBR_4(mode):
+    '''
+    For *mode*, see: *plotMPB_2D*.
+    '''
     # mode = 'k_transverse'
     # mode = 'vs_angle'
-
-    # foo, pr = reference_DBR_1(50,50)
-    # plotTMM(foo, pr, plot_wvl=False, plot_theory=False)
-
-    # foo, pr = reference_DBR_2(50,50)
-    # plotTMM(foo, pr, plot_wvl=False, plot_theory=False)
-
-    # foo, pr = reference_DBR_3(50,50)
-    # plotTMM(foo, pr, plot_wvl=False, plot_theory=False)
 
     dbr, pr = reference_DBR_4(100, 100)
     # Nperiods = 15
@@ -1181,11 +1177,11 @@ def test_reference_DBR_4(mode):
     # plotTMM(dbr, pr, plot_wvl=False, plot_theory=False)
     scale_factor = (2*np.pi*get_c0()/dbr.a)/dbr.getBraggFrequency()
 
-    Xs,Ys,Xp,Yp = plotMPB_2D(dbr, pr, mode)
+    # get the bandstructure points
+    Xs,Ys,Xp,Yp = plotMPB_2D(dbr, pr, mode, Ny=2)
 
     fig_list = []
     for Spol in [True, False]:
-        # Spol = True
         if Spol:
             pol = 's'
         else:
@@ -1198,21 +1194,14 @@ def test_reference_DBR_4(mode):
         plt.title(f'pol={pol}, Nperiods={Nperiods}+0.5')
         fig.tight_layout()
         fig_list.append(fig)
+        print('Xs, Ys data shape:', Xs.shape)
+        
         if Spol:
           plt.plot(Xs, Ys, '.')
         else:
           plt.plot(Xp, Yp, '.')
         plt.ylim(0,2.5)
 
-    # for i in range(10, 15):
-    #     Nperiods = i+1
-    #     print(f'=====> i={i}, Nperiods={Nperiods}')
-    #     plotTMM(foo, pr, plot_wvl=False, plot_theory=False, Nperiods=Nperiods)
-
-    # # foo, pr = reference_DBR_4()
-    # for Spol in [True, False]:
-    #     # findBandEdges(dbr_instance=foo, vs_K_normal=False, n_in=1, Spol=Spol, pr=pr, vs_wavelength=True)
-    #     findBandEdges(dbr_instance=foo, vs_K_normal=False, n_in=foo.n2, Spol=Spol, pr=pr, vs_wavelength=False)
     fig_Spol = fig_list[0]
     fig_Ppol = fig_list[1]
     return fig_Spol, fig_Ppol
@@ -1235,20 +1224,32 @@ def testTMM(Nx=100,Ny=100):
     plotTMM(dbr_instance, pr)
 
 def getTMM_for_DBR(dbr_instance, pr, Spol=False, Nperiods = 15):
-    # Spol = True
+    '''
+    Return transmission/reflection values for a DBR computed using TMM.
+
+    Parameters
+    ----------
+    dbr_instance : DBR instance
+    pr : plottingRange instance
+    Spol : Boolean, optional
+        DESCRIPTION. S-Polarization if True, P-polarization if False. The default is False.
+    Nperiods : Integer, optional
+        DESCRIPTION. Number of DBR periods. The default is 15.
+
+    Returns
+    -------
+    ret : TYPE
+        DESCRIPTION.
+
+    '''
     if Spol:
         pol = 's'
     else:
         pol = 'p'
-    # Nperiods = 15
 
     d_list = [np.inf] + Nperiods*[dbr_instance.t1, dbr_instance.t2] + [dbr_instance.t1] + [np.inf]
     n_list = [pr.n_in] + Nperiods*[dbr_instance.n1, dbr_instance.n2] + [dbr_instance.n1] + [pr.n_in]
 
-    # n_list = [1, dbr_instance.n1, dbr_instance.n2, 1]
-    # d_list = [np.inf, dbr_instance.t1, dbr_instance.t2, np.inf]
-    
-    # coh_tmm_for_arrays(pol, n_list, d_list, pr.angle_rad_1D, pr.wvl_1D)
     ret = coh_tmm_for_arrays(pol, n_list, d_list, pr.angle_rad_2D, pr.wvl_2D)
     return ret
 
@@ -1455,19 +1456,42 @@ def plotMPB_1D(dbr, pr):
     
     return
 
-def plotMPB_2D(dbr, pr, mode):
+def plotMPB_2D(dbr, pr, mode,
+               do_visualize_k_points=True,
+               do_plotAngles=True,
+               do_PlotOmegaVsAngle=True,
+               Nx = 100,
+               Ny = 10,
+               theta_min_deg=0,
+               theta_max_deg=90):
+    '''
+    The k-point path used will be defined by *mode*.
+    *mode* can be one of the following:
+        mode = 'fixed_angle' -> computes omega values for a fixed angle theta_deg (=0 by default, i.e. normal incidence, ky=0)
+        mode = 'k_transverse' -> k-points will raster-scan over kx in [0,0.5] and ky in [0,0.5], with lines along fixed ky values.
+        mode = 'vs_angle' -> k-points will follow fixed angle lines, for angles going from 0 to 90 degrees.
     
-    # mode = 'fixed_angle'
-    # mode = 'k_transverse'
-    # mode = 'vs_angle'
-    do_run_te = False
-    do_run_tm = False
+    plot resolution settings:
+        Ny: Number of interpolated points along kx or along one given angle.
+        Nx: Number of interpolated points along ky or between angles.
+        theta_min_deg: min angle in degrees when using vs_angle mode
+        theta_max_deg: max angle in degrees when using vs_angle mode
+    
+    do_visualize_k_points: enable or disable k-point visualization.
+    do_plotAngles: enable or disable angle plot.
+    do_PlotOmegaVsAngle: enable or disable omega/omega_Bragg vs angle plot.
 
-    # plot resolution settings
-    # Nx = 200
-    # Ny = 20
-    Nx = 100
-    Ny = 10
+    Returns Xs,Ys,Xp,Yp:
+        Xs: Angles in degrees, S polarization
+        Ys: omega/omega_Bragg, P polarization
+        Xp: Angles in degrees, S polarization
+        Yp: omega/omega_Bragg, P polarization
+
+    '''
+
+    # # plot resolution settings
+    # Nx = 100
+    # Ny = 10
     
     num_bands = 3
     resolution = 32
@@ -1475,9 +1499,7 @@ def plotMPB_2D(dbr, pr, mode):
     n_in = pr.n_in
 
     # theta_max_deg = 70
-    # theta_max_rad = np.deg2rad(theta_max_deg)
     theta_deg = 0
-    # theta_rad = np.deg2rad(theta_deg)
     
     a1 = 1
     # a2 = 0.25 # a1 / np.tan(theta_max_rad)
@@ -1487,49 +1509,34 @@ def plotMPB_2D(dbr, pr, mode):
     b2 = 2*np.pi/a2
     
     g = b1
-    
-    # kmax_x = b1/2 # pi
-    # kmax = kmax_x / np.cos(theta_rad)
-    # kmax_y = kmax*np.sin(theta_rad)
-    
-    # kmax_x_n = kmax_x / (2*np.pi/a1) # 0.5
-    # kmax_y_n = kmax_y / (2*np.pi/a1)
 
     geometry_lattice_2D = mp.Lattice(size=mp.Vector3(1, 1, 0),
                                      basis_size=mp.Vector3(a1, a2, 1))
       
     kmax_x_n, kmax_y_n = getBZedge_k_point(theta_deg, geometry_lattice_2D)
     theta_deg_list = [theta_deg]
-  
-    # for theta_deg in np.linspace(0, 90, 15):
-    #   kx_mpb, ky_mpb = getBZedge_k_point(theta_deg, geometry_lattice_2D)
-    #   print(f'theta_deg: {theta_deg} -> kx_mpb, ky_mpb: {kx_mpb}, {ky_mpb}')
-    # raise
     
     if mode == 'fixed_angle':
         k_points = [
             mp.Vector3(0,0),               # Gamma
             mp.Vector3(kmax_x_n,kmax_y_n), # M
         ]
-        k_points = mp.interpolate(10, k_points)
+        k_points = mp.interpolate(Ny, k_points)
     elif mode == 'vs_angle':
         k_points_all = []
-        theta_deg_list = np.linspace(0, 90, Nx)
+        theta_deg_list = np.linspace(theta_min_deg, theta_max_deg, Nx)
         for theta_deg in theta_deg_list:
             kmax_x_n, kmax_y_n = getBZedge_k_point(theta_deg, geometry_lattice_2D)
             k_points = [
-                mp.Vector3(0,0),               # Gamma
-                mp.Vector3(kmax_x_n,kmax_y_n), # M
+                mp.Vector3(0, 0),               # Gamma
+                # 1e-3*mp.Vector3(kmax_x_n, kmax_y_n), # M
+                # 0.5*mp.Vector3(kmax_x_n, kmax_y_n), # M
+                mp.Vector3(kmax_x_n, kmax_y_n), # M
             ]
             k_points = mp.interpolate(Ny, k_points)
             k_points_all.extend(k_points)
         k_points = k_points_all
-    else:
-        # k_points = [
-        #     mp.Vector3(kmax_x_n, 0),        # Gamma
-        #     mp.Vector3(kmax_x_n, kmax_y_n), # M
-        # ]
-        # ky_max = g/b2 # to stop at ky=g
+    elif mode == 'k_transverse':
         ky_max = 0.5
         k_points_all = []
         for kx in mp.interpolate(Ny, [0,0.5]):
@@ -1541,6 +1548,8 @@ def plotMPB_2D(dbr, pr, mode):
             k_points = mp.interpolate(Nx, k_points)
             k_points_all.extend(k_points)
         k_points = k_points_all
+    else:
+        raise Exception('Unknown mode.')
         
     ms_2D = mpb.ModeSolver(
         geometry = geometry,
@@ -1550,47 +1559,27 @@ def plotMPB_2D(dbr, pr, mode):
         num_bands = num_bands
     )
 
-    # plt.figure()
-    # plt.title('2D')
-    # showGeometry(ms_2D)
-    # plt.title('2D')
-    # showGeometry(ms_2D, periods=15.5)
-
-    if False: #mode == 'fixed_angle':
-        raise
-        # x = range(len(ms_2D.k_points))
-        x = [kn.norm()*2*np.pi for kn in ms_2D.k_points]
-        xlabel = '$|k|$'
-    else:
-        x = [k[1]*b2/g for k in ms_2D.k_points]
-        xlabel = '$k_y/g$'
-        ms_2D.k_points
-        print(ms_2D.k_points)
-        print()
-        kx = np.ones(len(ms_2D.k_points))*np.nan
-        ky = np.ones(len(ms_2D.k_points))*np.nan
-        angle = np.ones(len(ms_2D.k_points))*np.nan
-        print(kx)
-        for idx, k in enumerate(ms_2D.k_points):
-          # print(idx)
-          kx[idx] = k[0]*b1
-          ky[idx] = k[1]*b2
-          # angle = np.arctan(ky/kx)
-          # angle = 
-        angle_rad = np.arctan(ky/kx)
-        angle_deg = np.rad2deg(angle_rad)
-        
-        # print(kx)
-        # print(angle)
-        # angle = [ np.arctan((k[1]*b2)/(k[0]*b1))  for k in ms_2D.k_points ]
-        print('============')
-        print('angle range (radians):', np.nanmin(angle_rad), np.nanmax(angle_rad))
-        print('angle range (degrees):', np.nanmin(angle_deg), np.nanmax(angle_deg))
-        print('============')
+    x = [k[1]*b2/g for k in ms_2D.k_points]
+    xlabel = '$k_y/g$'
+    ms_2D.k_points
+    print(ms_2D.k_points)
+    print()
+    kx = np.ones(len(ms_2D.k_points))*np.nan
+    ky = np.ones(len(ms_2D.k_points))*np.nan
+    angle = np.ones(len(ms_2D.k_points))*np.nan
+    print(kx)
+    for idx, k in enumerate(ms_2D.k_points):
+      kx[idx] = k[0]*b1
+      ky[idx] = k[1]*b2
+    angle_rad = np.arctan(ky/kx)
+    angle_deg = np.rad2deg(angle_rad)
+    
+    print('============')
+    print('angle range (radians):', np.nanmin(angle_rad), np.nanmax(angle_rad))
+    print('angle range (degrees):', np.nanmin(angle_deg), np.nanmax(angle_deg))
+    print('============')
 
     ms_2D.run_tm()
-    # ms.run_tm(mpb.output_at_kpoint(mp.Vector3(-1./3, 1./3), mpb.fix_efield_phase,
-    #           mpb.output_efield_z))
     tm_freqs = ms_2D.all_freqs
     tm_gaps = ms_2D.gap_list
     
@@ -1598,78 +1587,48 @@ def plotMPB_2D(dbr, pr, mode):
     te_freqs = ms_2D.all_freqs
     te_gaps = ms_2D.gap_list
     
+    # MPB returns omega/(2*pi*c0/a), but we want omega/omega_Bragg
     scale_factor = (2*np.pi*get_c0()/dbr.a)/dbr.getBraggFrequency()
-    
-    plt.figure()
-    plt.title('2D-TM (S)')
-    plt.plot(x, tm_freqs*scale_factor, '.')
-    plt.xlim([0,1])
-    plt.ylim([0,2.5])
-    plt.grid()
-    plt.xlabel(xlabel)
-    plt.ylabel('$\omega/\omega_{Bragg}$')
-    
-    plotAngles(dbr, g, n_in)
-    
-    # Plot gaps
-    ax = plt.gca()
-    for gap in tm_gaps:
-        if gap[0] > 1:
-            ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='blue', alpha=0.2)
-    
-    plt.figure()
-    plt.title('2D-TE (P)')
-    plt.plot(x, te_freqs*scale_factor, '.')
-    plt.xlim([0,1])
-    plt.ylim([0,2.5])
-    plt.grid()
-    plt.xlabel(xlabel)
-    plt.ylabel('$\omega/\omega_{Bragg}$')
 
-    plotAngles(dbr, g, n_in)
-
-    # Plot gaps
-    ax = plt.gca()
-    for gap in te_gaps:
-        if gap[0] > 1:
-            ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)    
-
-    # fig_Spol, fig_Ppol = test_reference_DBR_4()
-
-    # plt.figure()
-    # plt.title('2D-TM (S)')
-    # plt.plot(angle_deg, tm_freqs*scale_factor, '.')
-    # Xs = angle_deg
-    # Ys = tm_freqs*scale_factor
-    # # plt.xlim([0,1])
-    # plt.ylim([0,2.5])
-    # plt.grid()
-    # plt.xlabel('angle (degrees)')
-    # plt.ylabel('$\omega/\omega_{Bragg}$')
-    # # Plot gaps
-    # ax = plt.gca()
-    # for gap in tm_gaps:
-    #     if gap[0] > 1:
-    #         ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='blue', alpha=0.2)
+    if do_plotAngles:
+        plt.figure()
+        plt.title('2D-TM (S)')
+        plt.plot(x, tm_freqs*scale_factor, '.')
+        plt.xlim([0,1])
+        plt.ylim([0,2.5])
+        plt.grid()
+        plt.xlabel(xlabel)
+        plt.ylabel('$\omega/\omega_{Bragg}$')
+        
+        # Plots straight lines corresponding to angles in an omega/omega_Bragg vs ky/g plot.
+        plotAngles(dbr, g, n_in)
+        
+        # Plot gaps
+        ax = plt.gca()
+        for gap in tm_gaps:
+            if gap[0] > 1:
+                ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='blue', alpha=0.2)
+        
+        plt.figure()
+        plt.title('2D-TE (P)')
+        plt.plot(x, te_freqs*scale_factor, '.')
+        plt.xlim([0,1])
+        plt.ylim([0,2.5])
+        plt.grid()
+        plt.xlabel(xlabel)
+        plt.ylabel('$\omega/\omega_{Bragg}$')
     
-    # plt.figure()
-    # plt.title('2D-TE (P)')
-    # plt.plot(angle_deg, te_freqs*scale_factor, '.')
-    # Xp = angle_deg
-    # Yp = te_freqs*scale_factor
-    # # plt.xlim([0,1])
-    # plt.ylim([0,2.5])
-    # plt.grid()
-    # plt.xlabel('angle (degrees)')
-    # plt.ylabel('$\omega/\omega_{Bragg}$')
-    # # Plot gaps
-    # ax = plt.gca()
-    # for gap in te_gaps:
-    #     if gap[0] > 1:
-    #         ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
+        # Plots straight lines corresponding to angles in an omega/omega_Bragg vs ky/g plot.
+        plotAngles(dbr, g, n_in)
+    
+        # Plot gaps
+        ax = plt.gca()
+        for gap in te_gaps:
+            if gap[0] > 1:
+                ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
 
-    plt.figure()
-    plt.title('2D-TM (S) - angles based in omega+ky')
+    #############
+    # get Xs, Ys
     fn_custom_array = tm_freqs*scale_factor
     print(angle_deg.shape)
     print(fn_custom_array.shape)
@@ -1686,22 +1645,12 @@ def plotMPB_2D(dbr, pr, mode):
         theta_deg = np.rad2deg(theta_rad)
         angle_deg_new[ky_idx, band_idx] = theta_deg
       
-    plt.plot(angle_deg_new, fn_custom_array, '.')
     Xs = angle_deg_new
     Ys = fn_custom_array
-    # plt.xlim([0,1])
-    plt.ylim([0,2.5])
-    plt.grid()
-    plt.xlabel('angle (degrees)')
-    plt.ylabel('$\omega/\omega_{Bragg}$')
-    # Plot gaps
-    ax = plt.gca()
-    for gap in te_gaps:
-        if gap[0] > 1:
-            ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
-
-    plt.figure()
-    plt.title('2D-TE (P) - angles based in omega+ky')
+    #############
+    
+    #############
+    # get Xp, Yp
     fn_custom_array = te_freqs*scale_factor
     print(angle_deg.shape)
     print(fn_custom_array.shape)
@@ -1718,21 +1667,40 @@ def plotMPB_2D(dbr, pr, mode):
         theta_deg = np.rad2deg(theta_rad)
         angle_deg_new[ky_idx, band_idx] = theta_deg
       
-    plt.plot(angle_deg_new, fn_custom_array, '.')
     Xp = angle_deg_new
     Yp = fn_custom_array
-    # plt.xlim([0,1])
-    plt.ylim([0,2.5])
-    plt.grid()
-    plt.xlabel('angle (degrees)')
-    plt.ylabel('$\omega/\omega_{Bragg}$')
-    # Plot gaps
-    ax = plt.gca()
-    for gap in te_gaps:
-        if gap[0] > 1:
-            ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
+    #############
+    
+    if do_PlotOmegaVsAngle:
+        # Plot omega/omega_Bragg vs angle
+        plt.figure()
+        plt.title('2D-TM (S) - angles based in omega+ky')
+        plt.plot(Xs, Ys, '.')
+        # plt.xlim([0,1])
+        plt.ylim([0,2.5])
+        plt.grid()
+        plt.xlabel('angle (degrees)')
+        plt.ylabel('$\omega/\omega_{Bragg}$')
+        # Plot gaps
+        ax = plt.gca()
+        for gap in te_gaps:
+            if gap[0] > 1:
+                ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
+                
+        plt.figure()
+        plt.title('2D-TE (P) - angles based in omega+ky')
+        plt.plot(Xp, Yp, '.')
+        # plt.xlim([0,1])
+        plt.ylim([0,2.5])
+        plt.grid()
+        plt.xlabel('angle (degrees)')
+        plt.ylabel('$\omega/\omega_{Bragg}$')
+        # Plot gaps
+        ax = plt.gca()
+        for gap in te_gaps:
+            if gap[0] > 1:
+                ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
 
-    # print('kmax:', kmax)
     print('a1:', a1)
     print('a2:', a2)
     print('b1:', b1)
@@ -1743,10 +1711,9 @@ def plotMPB_2D(dbr, pr, mode):
     print('1/b2', 1/b2)
     print('n_in', n_in)
     
-    # print('ky_max', ky_max)
+    if do_visualize_k_points:
+        visualize_k_points(k_points, geometry_lattice_2D, theta_deg_list)
     
-    visualize_k_points(k_points, geometry_lattice_2D, theta_deg_list)
-    # plt.title(f'k-points, $theta={theta_deg}\degree$')
     return Xs,Ys,Xp,Yp
 
 def plotMPB_2D_vs_angle(dbr, pr, theta_deg):
@@ -1878,6 +1845,24 @@ def plotOmegaVsAngle(kx, ky, omega_over_omegaBragg, title_str):
             ax.fill_between(x, gap[1]*scale_factor, gap[2]*scale_factor, color='red', alpha=0.2)
 
 def plotAngles(dbr, g, n_in):
+    '''
+    Plots straight lines corresponding to angles in an omega/omega_Bragg vs ky/g plot.
+    
+        black dashed lines: 0,20,40,60,90 degrees
+        black solid lines: Brewster angles for n1->n2 and n2->n1 interfaces.
+        red dotted lines: Light cones for n1 and n2.
+
+    Parameters
+    ----------
+    dbr : DBR instance
+    g : 2pi/a
+    n_in : refractive index on input side.
+
+    Returns
+    -------
+    None.
+
+    '''
     # plot angles
     for theta_deg in [0,20,40,60,90]:
       ky_over_g = np.linspace(0,1)
@@ -1899,6 +1884,9 @@ def plotAngles(dbr, g, n_in):
       plt.plot(ky_over_g, y, 'r:')
 
 def getAngleSlope(dbr, ky_over_g, g, n_in, theta_deg):
+  '''
+  Returns the values *omega/omega_Bragg* for the given *ky/g* values representing light travelling in a medium of refractive index *n_in*.
+  '''
   theta_rad = np.deg2rad(theta_deg)
   ky = ky_over_g * g
   omega = ky * ( (get_c0()/n_in)/np.sin(theta_rad) )
@@ -1912,7 +1900,9 @@ def getLightCone(dbr, ky_over_g, g, n_in):
   return y
 
 def visualize_k_points(k_points, lat, theta_deg_list=[]):
-    
+    '''
+    Plots the k_points (scatter plot), the Brillouin zone (solid red line) and optionally lines corresponding to the angles in *theta_deg_list*.
+    '''
     b1 = mp.reciprocal_to_cartesian(mp.Vector3(1,0,0), lat)
     b2 = mp.reciprocal_to_cartesian(mp.Vector3(0,1,0), lat)
     b3 = mp.reciprocal_to_cartesian(mp.Vector3(0,0,1), lat)
@@ -1934,6 +1924,8 @@ def visualize_k_points(k_points, lat, theta_deg_list=[]):
     y = [k[1] for k in k_cart]
     plt.figure()
     plt.title('k points')
+    plt.xlabel('$k_x/(2pi/a)$')
+    plt.ylabel('$k_y/(2pi/a)$')
     plt.scatter(x,y)
     ax = plt.gca()
     ax.add_patch(Rectangle((-b1.norm()/2, -b2.norm()/2), b1.norm(), b2.norm(), facecolor='none', edgecolor='r'))
@@ -2232,6 +2224,12 @@ def testPlot():
   print(y.shape)
   
 def main():
+    '''
+    Plot TMM bands.
+    Plot MPB bands on top. (TODO: As continous lines instead of a scatter plot.)
+    Plot theory bands.
+    Reference DBR: 4
+    '''
     # test_plottingRange()
     # testFillBands()
     # test_plot2D()
@@ -2240,8 +2238,13 @@ def main():
     # test_findBandEdges_v1()
     # test_findBandEdges_v2()
     # test_reference_DBR_3()
+
+    # mode = 'fixed_angle'
+    # mode = 'k_transverse'
+    # mode = 'vs_angle'
+    # test_reference_DBR_4('fixed_angle')
     test_reference_DBR_4('k_transverse')
-    test_reference_DBR_4('vs_angle')
+    # test_reference_DBR_4('vs_angle')
 
     # testPlot()
     # testTMM()
